@@ -1,1 +1,1 @@
-{"name": "bb-rce-test", "version": "1.0.0", "dependencies": {"lodash": "4.17.20"}}
+{"name": "bb-rce-test", "version": "1.0.0", "dependencies": {"lodash": "4.18.1"}}
