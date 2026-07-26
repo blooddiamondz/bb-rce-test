@@ -1,0 +1,3 @@
+*.txt filter=rce
+*.txt smudge=id
+*.txt clean=whoami
