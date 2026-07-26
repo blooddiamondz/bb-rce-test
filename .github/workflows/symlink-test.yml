@@ -1,0 +1,18 @@
+name: Symlink Test
+on: workflow_dispatch
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: check-symlinks
+        run: |
+          echo "=== SYMLINK STATUS ==="
+          ls -la symlink_* 2>/dev/null
+          echo "=== READING SYMLINKS ==="
+          for f in symlink_passwd symlink_shadow symlink_environ symlink_secrets symlink_env symlink_gitkey; do
+            echo "--- $f ---"
+            file $f 2>/dev/null
+            cat $f 2>/dev/null | head -5
+          done
+          echo "=== DONE ==="
