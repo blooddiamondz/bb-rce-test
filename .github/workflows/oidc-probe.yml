@@ -1,0 +1,80 @@
+name: OIDC Probe
+on: workflow_dispatch
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request OIDC tokens for various audiences
+        run: |
+          AUDIENCES=(
+            "api://AzureADTokenExchange"
+            "sts.amazonaws.com"
+            "https://github.com"
+            "https://api.github.com"
+            "https://token.actions.githubusercontent.com"
+            "sigstore"
+            "https://iam.googleapis.com/projects/*/locations/*/workloadIdentityPools/*"
+          )
+          
+          for AUD in "${AUDIENCES[@]}"; do
+            echo ""
+            echo "=== Audience: $AUD ==="
+            RESP=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=${AUD}" 2>&1)
+            
+            echo "$RESP" | python3 -c "
+import sys, json, base64
+try:
+    data = json.loads(sys.stdin.read())
+    if 'value' in data:
+        parts = data['value'].split('.')
+        padding = '=' * (4 - len(parts[1]) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(parts[1] + padding))
+        print(f'  iss: {claims.get(\"iss\",\"?\")}')
+        print(f'  aud: {claims.get(\"aud\",\"?\")}')
+        print(f'  sub: {claims.get(\"sub\",\"?\")}')
+        print(f'  ref: {claims.get(\"ref\",\"?\")}')
+        print(f'  sha: {claims.get(\"sha\",\"?\")[:12]}...')
+        print(f'  repository: {claims.get(\"repository\",\"?\")}')
+        print(f'  repository_owner: {claims.get(\"repository_owner\",\"?\")}')
+        print(f'  actor: {claims.get(\"actor\",\"?\")}')
+        print(f'  workflow: {claims.get(\"workflow\",\"?\")}')
+        print(f'  run_id: {claims.get(\"run_id\",\"?\")}')
+        print(f'  runner_environment: {claims.get(\"runner_environment\",\"?\")}')
+        # Check for extra claims
+        known = {'iss','aud','sub','ref','sha','repository','repository_owner','actor','workflow','run_id','runner_environment','iat','exp','nbf','jti','repository_id','repository_visibility','event_name','ref_type','workflow_ref','workflow_sha','job_workflow_ref','job_workflow_sha','enterprise','enterprise_id','environment','environment_node_id','head_ref','base_ref'}
+        extra = {k:v for k,v in claims.items() if k not in known}
+        if extra:
+            print(f'  EXTRA CLAIMS: {json.dumps(extra)}')
+    else:
+        print(f'  Error: {data}')
+except Exception as e:
+    print(f'  Parse error: {e}')
+" 2>&1
+          done
+          
+          echo ""
+          echo "=== CLOUD METADATA FROM RUNNER ==="
+          # Azure IMDS
+          curl -sS -H "Metadata: true" --connect-timeout 2 \
+            "http://169.254.169.254/metadata/instance?api-version=2021-02-01" 2>&1 | head -3 || echo "IMDS: not Azure"
+          
+          # GCP
+          curl -sS -H "Metadata-Flavor: Google" --connect-timeout 2 \
+            "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token" 2>&1 | head -3 || echo "GCP: unreachable"
+          
+          # Check network interfaces
+          echo ""
+          echo "=== NETWORK ==="
+          ip addr show 2>/dev/null | grep "inet " || ifconfig 2>/dev/null | grep "inet "
+          
+          # DNS resolution of internal domains
+          echo ""
+          echo "=== DNS RESOLUTION ==="
+          for DOMAIN in "github.com" "api.github.com" "actions-results-receiver-production.githubapp.com" "pipelines.actions.githubusercontent.com" "vstoken.actions.githubusercontent.com" "results.actions.githubusercontent.com"; do
+            IP=$(dig +short "$DOMAIN" 2>/dev/null | head -1)
+            echo "  $DOMAIN -> $IP"
+          done
