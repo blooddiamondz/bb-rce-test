@@ -1,2 +1,7 @@
 [lfs]
     url = http://169.254.169.254/latest/meta-data/
+    access = basic
+[lfs "transfer"]
+    maxretries = 1
+[lfs "http://169.254.169.254"]
+    access = basic
