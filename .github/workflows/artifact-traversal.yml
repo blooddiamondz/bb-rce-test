@@ -1,0 +1,16 @@
+name: Artifact Traversal
+on: workflow_dispatch
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create and upload artifact with traversal
+        run: |
+          mkdir -p /tmp/artifacts
+          echo "test" > /tmp/artifacts/test.txt
+          echo "traversal" > "/tmp/artifacts/../../../etc/test_traversal"
+      
+      - uses: actions/upload-artifact@v4
+        with:
+          name: "../../../etc/traversal-test"
+          path: /tmp/artifacts/test.txt
