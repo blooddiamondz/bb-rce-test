@@ -1,0 +1,18 @@
+name: RCE Proof - Expression Injection Demo
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  vulnerable-job:
+    if: contains(github.event.comment.body, '/exec')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo the comment
+        run: |
+          echo "Processing command: ${{ github.event.comment.body }}"
+          echo "Done"
